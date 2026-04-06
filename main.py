@@ -2,50 +2,63 @@ import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 
-st.set_page_config(page_title="HMI Henkel", layout="centered")
+# 1. Configuración de la App
+st.set_page_config(page_title="HMI Henkel - WAPOSAT", layout="centered")
 
-# --- CONEXIÓN ---
-conn = st.connection("gsheets", type=GSheetsConnection)
-
-# Intentar leer, si falla, crear un DataFrame vacío
+# 2. Conexión a Google Sheets (Usando tus Secrets corregidos)
+# Si aquí da error, es por los Secrets en el panel de Streamlit
 try:
-    df_existente = conn.read(worksheet="Sheet1", ttl=0)
-    if 'asistencia' in df_existente.columns:
+    conn = st.connection("gsheets", type=GSheetsConnection)
+    df_existente = conn.read(ttl=0)
+    
+    # Extraer lista de asistencias si la columna existe
+    if not df_existente.empty and 'asistencia' in df_existente.columns:
         lista_asistencias = df_existente['asistencia'].dropna().tolist()
     else:
         lista_asistencias = []
-except Exception:
+except Exception as e:
+    st.warning("Conectando con la base de datos...")
     lista_asistencias = []
 
+# 3. Estado de la sesión
 if 'asistencias' not in st.session_state:
     st.session_state.asistencias = lista_asistencias
 
-# --- INTERFAZ ---
-st.title("📊 Control de Prácticas WAPOSAT")
-HORAS = {"Lunes": 10, "Martes": 5, "Miércoles": 5, "Viernes": 5}
-total = sum(HORAS.get(reg.split(" - ")[1], 0) for reg in st.session_state.asistencias)
+# 4. Interfaz de Usuario
+st.title("📊 Control de Prácticas - Henkel")
+st.write("Registra tus horas para WAPOSAT de forma segura.")
 
-col1, col2 = st.columns(2)
-col1.metric("Acumuladas", f"{total} hrs")
-col2.metric("Meta", "320 hrs")
-st.progress(min(total / 320, 1.0))
+# Cálculo de horas (L:10h, M-V:5h)
+HORAS_MAP = {"Lunes": 10, "Martes": 5, "Miércoles": 5, "Viernes": 5}
+total_hrs = sum(HORAS_MAP.get(reg.split(" - ")[1], 0) for reg in st.session_state.asistencias)
 
-# --- REGISTRO ---
-with st.expander("📅 MARCAR ASISTENCIA"):
+# Métricas
+c1, c2 = st.columns(2)
+c1.metric("Horas Logradas", f"{total_hrs} h")
+c2.metric("Meta Final", "320 h")
+st.progress(min(total_hrs / 320, 1.0))
+
+# 5. Marcado de Asistencia (Semanas 1-16)
+with st.expander("📅 REGISTRAR DÍAS TRABAJADOS"):
     for s in range(1, 17):
-        st.write(f"**Semana {s}**")
+        st.subheader(f"Semana {s}")
         cols = st.columns(4)
-        for i, (dia, h) in enumerate(HORAS.items()):
+        for i, (dia, h) in enumerate(HORAS_MAP.items()):
             tag = f"S{s} - {dia}"
-            if cols[i].checkbox(f"{dia}", value=(tag in st.session_state.asistencias), key=tag):
-                if tag not in st.session_state.asistencias:
-                    st.session_state.asistencias.append(tag)
-            elif tag in st.session_state.asistencias:
+            is_checked = cols[i].checkbox(f"{dia} ({h}h)", value=(tag in st.session_state.asistencias), key=tag)
+            
+            if is_checked and tag not in st.session_state.asistencias:
+                st.session_state.asistencias.append(tag)
+            elif not is_checked and tag in st.session_state.asistencias:
                 st.session_state.asistencias.remove(tag)
 
-# --- GUARDADO ---
-if st.button("💾 GUARDAR EN GOOGLE CLOUD", type="primary"):
-    nuevo_df = pd.DataFrame({"asistencia": st.session_state.asistencias})
-    conn.update(worksheet="Sheet1", data=nuevo_df)
-    st.success("¡Sincronizado con Google Sheets!")
-    st.balloons()
+# 6. Botón de Guardado
+if st.button("💾 GUARDAR CAMBIOS EN LA NUBE", type="primary"):
+    try:
+        nuevo_df = pd.DataFrame({"asistencia": st.session_state.asistencias})
+        conn.update(data=nuevo_df)
+        st.success("¡Datos guardados con éxito en Google Sheets!")
+        st.balloons()
+    except Exception as e:
+        st.error(f"Error al guardar: {e}")
+        st.info("Revisa que hayas compartido el Excel con el correo de la cuenta de servicio.")
