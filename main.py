@@ -2,50 +2,50 @@ import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 
-st.set_page_config(page_title="HMI Prácticas Henkel", layout="centered")
+st.set_page_config(page_title="HMI Henkel", layout="centered")
 
-# --- CONEXIÓN A GOOGLE SHEETS ---
-# Este es el código que el mensaje te pedía verificar
+# --- CONEXIÓN ---
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# Leer datos existentes del Excel
-df_existente = conn.read(ttl=0) 
+# Intentar leer, si falla, crear un DataFrame vacío
+try:
+    df_existente = conn.read(worksheet="Sheet1", ttl=0)
+    if 'asistencia' in df_existente.columns:
+        lista_asistencias = df_existente['asistencia'].dropna().tolist()
+    else:
+        lista_asistencias = []
+except Exception:
+    lista_asistencias = []
 
 if 'asistencias' not in st.session_state:
-    st.session_state.asistencias = df_existente['asistencia'].tolist() if not df_existente.empty else []
+    st.session_state.asistencias = lista_asistencias
 
-# --- CONFIGURACIÓN ---
-st.title("📊 HMI Control de Prácticas")
-HORAS_DIARIAS = {"Lunes": 10, "Martes": 5, "Miércoles": 5, "Viernes": 5}
-META = 320
+# --- INTERFAZ ---
+st.title("📊 Control de Prácticas WAPOSAT")
+HORAS = {"Lunes": 10, "Martes": 5, "Miércoles": 5, "Viernes": 5}
+total = sum(HORAS.get(reg.split(" - ")[1], 0) for reg in st.session_state.asistencias)
 
-# Calcular horas
-total_hrs = sum(HORAS_DIARIAS.get(reg.split(" - ")[1], 0) for reg in st.session_state.asistencias)
-
-# --- DASHBOARD ---
 col1, col2 = st.columns(2)
-col1.metric("Horas Acumuladas", f"{total_hrs} hrs")
-col2.metric("Meta Restante", f"{max(0, META - total_hrs)} hrs")
-st.progress(min(total_hrs / META, 1.0))
+col1.metric("Acumuladas", f"{total} hrs")
+col2.metric("Meta", "320 hrs")
+st.progress(min(total / 320, 1.0))
 
 # --- REGISTRO ---
-st.subheader("🗓️ Marcado de Asistencia")
-for s in range(1, 17):
-    with st.expander(f"SEMANA {s}"):
-        for dia, hrs in HORAS_DIARIAS.items():
-            id_tag = f"Semana {s} - {dia}"
-            esta_marcado = id_tag in st.session_state.asistencias
-            
-            if st.checkbox(f"{dia} ({hrs} hrs)", value=esta_marcado, key=id_tag):
-                if id_tag not in st.session_state.asistencias:
-                    st.session_state.asistencias.append(id_tag)
-            else:
-                if id_tag in st.session_state.asistencias:
-                    st.session_state.asistencias.remove(id_tag)
+with st.expander("📅 MARCAR ASISTENCIA"):
+    for s in range(1, 17):
+        st.write(f"**Semana {s}**")
+        cols = st.columns(4)
+        for i, (dia, h) in enumerate(HORAS.items()):
+            tag = f"S{s} - {dia}"
+            if cols[i].checkbox(f"{dia}", value=(tag in st.session_state.asistencias), key=tag):
+                if tag not in st.session_state.asistencias:
+                    st.session_state.asistencias.append(tag)
+            elif tag in st.session_state.asistencias:
+                st.session_state.asistencias.remove(tag)
 
-# --- BOTÓN DE GUARDADO ---
-if st.button("💾 SINCRONIZAR CON LA NUBE", type="primary", use_container_width=True):
+# --- GUARDADO ---
+if st.button("💾 GUARDAR EN GOOGLE CLOUD", type="primary"):
     nuevo_df = pd.DataFrame({"asistencia": st.session_state.asistencias})
-    conn.update(data=nuevo_df)
-    st.success("¡Datos guardados en Google Sheets!")
+    conn.update(worksheet="Sheet1", data=nuevo_df)
+    st.success("¡Sincronizado con Google Sheets!")
     st.balloons()
